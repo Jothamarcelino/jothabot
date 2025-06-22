@@ -4,7 +4,7 @@ import pandas as pd
 import os
 
 st.set_page_config(page_title="JOTHA 2.0", layout="wide")
-st.title("🤖 JOTHA 2.0 - Assistente Jurídico do IF Sudeste MG")
+st.title("🤖 JOTHA 2.0 - Assistente da Coordenação de Estágio")
 
 st.sidebar.image("https://bit.ly/jotha-aberto", width=100)
 st.sidebar.markdown("### 📊 Painel de Gerenciamento")

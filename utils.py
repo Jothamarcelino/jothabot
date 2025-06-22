@@ -33,21 +33,34 @@ def responder_usuario(pergunta):
             "Depois clique em 'Rerun'.", False
         )
 
-    # Busca em cada fonte
+    # 🔍 Prioriza FAQ
     docs_faq = retriever_faq.get_relevant_documents(pergunta)[:1] if retriever_faq else []
-    docs_pdf = retriever_pdf.get_relevant_documents(pergunta)[:1] if retriever_pdf else []
-    docs_planos = retriever_planos.get_relevant_documents(pergunta)[:1] if retriever_planos else []
 
-    # Se nenhum resultado
-    if not docs_faq and not docs_pdf and not docs_planos:
-        return ("🤔 Hmm... não encontrei nada sobre isso nos meus arquivos. Mas já registrei sua dúvida! 😉", False)
+    if docs_faq:
+        contexto = "\n\n".join([doc.page_content for doc in docs_faq])
+    else:
+        # Caso FAQ não encontre, busca nas leis e planos
+        docs_pdf = retriever_pdf.get_relevant_documents(pergunta)[:1] if retriever_pdf else []
+        docs_planos = retriever_planos.get_relevant_documents(pergunta)[:1] if retriever_planos else []
 
-    # Junta o conteúdo dos documentos retornados
-    contexto = "\n\n".join([doc.page_content for doc in docs_faq + docs_pdf + docs_planos])
+        if not docs_pdf and not docs_planos:
+            return ("🤔 Hmm... não encontrei nada sobre isso nos meus arquivos. Mas já registrei sua dúvida! 😉", False)
+
+        contexto = "\n\n".join([doc.page_content for doc in docs_pdf + docs_planos])
+
+    # 🔒 Limita tamanho
     contexto = contexto[:15000]
+
+    # 🧠 Prompt reforçado
     prompt = f"""
 Você é o JOTHA, assistente virtual da Coordenação de Estágio do IF Sudeste MG - Campus Barbacena.
-Responda com simpatia, clareza e base apenas no contexto abaixo. Nunca invente.
+
+Responda com simpatia, clareza e **base apenas no contexto abaixo**. Não invente, não complemente e não improvise.  
+Seja útil e direto, mas mantenha um tom acolhedor e divertido.
+
+⚠️ Regras:
+- Use exatamente o que estiver no contexto, especialmente se houver HTML.
+- Se não encontrar resposta, diga que não encontrou e oriente o usuário a procurar a Coordenação de Estágio.
 
 Contexto:
 {contexto}
@@ -61,7 +74,7 @@ Resposta:
     response = client.chat.completions.create(
         model="llama3-8b-8192",
         messages=[
-            {"role": "system", "content": "Você responde em português, com gentileza e precisão."},
+            {"role": "system", "content": "Você responde em português, com gentileza, precisão e sem inventar informações."},
             {"role": "user", "content": prompt}
         ],
         temperature=0.3,
