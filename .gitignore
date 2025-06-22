@@ -1,0 +1,22 @@
+# Ambientes virtuais e cache
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Arquivos temporários e do sistema
+.DS_Store
+*.log
+*.bak
+
+# Segredos e variáveis
+.streamlit/secrets.toml
+.env
+
+# Dados gerados localmente
+vectorstore/
+nao_respondidas.csv
+
+# Arquivos do VS Code (opcional)
+.vscode/
