@@ -34,9 +34,9 @@ def responder_usuario(pergunta):
         )
 
     # Busca em cada fonte
-    docs_faq = retriever_faq.invoke(pergunta) if retriever_faq else []
-    docs_pdf = retriever_pdf.invoke(pergunta) if retriever_pdf else []
-    docs_planos = retriever_planos.invoke(pergunta) if retriever_planos else []
+    docs_faq = retriever_faq.get_relevant_documents(pergunta)[:1] if retriever_faq else []
+    docs_pdf = retriever_pdf.get_relevant_documents(pergunta)[:1] if retriever_pdf else []
+    docs_planos = retriever_planos.get_relevant_documents(pergunta)[:1] if retriever_planos else []
 
     # Se nenhum resultado
     if not docs_faq and not docs_pdf and not docs_planos:
@@ -44,7 +44,7 @@ def responder_usuario(pergunta):
 
     # Junta o conteúdo dos documentos retornados
     contexto = "\n\n".join([doc.page_content for doc in docs_faq + docs_pdf + docs_planos])
-
+    contexto = contexto[:15000]
     prompt = f"""
 Você é o JOTHA, assistente virtual da Coordenação de Estágio do IF Sudeste MG - Campus Barbacena.
 Responda com simpatia, clareza e base apenas no contexto abaixo. Nunca invente.

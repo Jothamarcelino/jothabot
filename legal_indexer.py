@@ -19,7 +19,7 @@ for pdf in pdfs:
     all_docs.extend(docs)
 
 # Quebra os documentos em pedaços menores
-splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=20)
 chunks = splitter.split_documents(all_docs)
 
 # Gera os embeddings

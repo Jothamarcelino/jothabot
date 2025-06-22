@@ -29,7 +29,7 @@ for _, row in df.iterrows():
     docs.append(doc)
 
 # Divide os documentos em pedaços pequenos
-splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=20)
 chunks = splitter.split_documents(docs)
 
 # Gera os embeddings
