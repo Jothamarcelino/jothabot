@@ -1,5 +1,7 @@
 # Ambientes virtuais e cache
 .venv/
+.devcontainer/
+.vscode/
 __pycache__/
 *.py[cod]
 *.pyo
@@ -15,7 +17,7 @@ __pycache__/
 .env
 
 # Dados gerados localmente
-vectorstore/
+
 nao_respondidas.csv
 
 # Arquivos do VS Code (opcional)
