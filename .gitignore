@@ -20,3 +20,11 @@ nao_respondidas.csv
 
 # Arquivos do VS Code (opcional)
 .vscode/
+
+# Ignorar arquivos das leis e planos
+data/legal/*
+data/planos/*
+
+# Mas manter a estrutura das pastas
+!data/legal/.gitkeep
+!data/planos/.gitkeep

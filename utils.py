@@ -4,6 +4,7 @@ import streamlit as st
 from groq import Groq
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 
 # Tenta carregar vetor com tratamento de erro
 def tentar_carregar_retriever(path):

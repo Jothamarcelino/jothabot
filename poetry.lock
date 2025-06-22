@@ -1155,6 +1155,26 @@ tenacity = ">=8.1.0,<8.4.0 || >8.4.0,<10.0.0"
 typing-extensions = ">=4.7"
 
 [[package]]
+name = "langchain-huggingface"
+version = "0.3.0"
+description = "An integration package connecting Hugging Face and LangChain."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "langchain_huggingface-0.3.0-py3-none-any.whl", hash = "sha256:aab85d57e649c805d2f2a9f8d72d87b5d12c45dd4831309ac9c37753ddb237ed"},
+    {file = "langchain_huggingface-0.3.0.tar.gz", hash = "sha256:d1cf93fb4d4eafc8b44edcd5fba904b27cbd3fda6cdef0e2321fbcf4efcda822"},
+]
+
+[package.dependencies]
+huggingface-hub = ">=0.30.2"
+langchain-core = ">=0.3.65,<1.0.0"
+tokenizers = ">=0.19.1"
+
+[package.extras]
+full = ["sentence-transformers (>=2.6.0)", "transformers (>=4.39.0)"]
+
+[[package]]
 name = "langchain-text-splitters"
 version = "0.3.8"
 description = "LangChain text splitting utilities"
@@ -3862,4 +3882,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4.0"
-content-hash = "9a70f52d1e9a6ddb2b38216f53b69b2d9ff48bed0334e2865292e253a70a0015"
+content-hash = "2a8f83d69b73fda33b30365a41f3d18b49e23a9247b97e82188b4cc773414208"
