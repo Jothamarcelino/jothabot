@@ -1,39 +1,52 @@
+import os
 import pandas as pd
+import streamlit as st
+from groq import Groq
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from groq import Groq
-import os
-import streamlit as st
 
-# Carrega vetores com segurança
-def carregar_retriever(path):
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-    return FAISS.load_local(path, embeddings, allow_dangerous_deserialization=True).as_retriever()
+# Tenta carregar vetor com tratamento de erro
+def tentar_carregar_retriever(path):
+    try:
+        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+        retriever = FAISS.load_local(path, embeddings, allow_dangerous_deserialization=True).as_retriever()
+        return retriever
+    except Exception as e:
+        print(f"⚠️ Não foi possível carregar vetores de: {path} → {e}")
+        return None
 
-retriever_faq = carregar_retriever("vectorstore/faq_index")
-retriever_pdf = carregar_retriever("vectorstore/legal_index")
-retriever_planos = carregar_retriever("vectorstore/planos_index")
+# Carrega os três repositórios vetoriais (FAQ, Leis, PPCs)
+retriever_faq = tentar_carregar_retriever("vectorstore/faq_index")
+retriever_pdf = tentar_carregar_retriever("vectorstore/legal_index")
+retriever_planos = tentar_carregar_retriever("vectorstore/planos_index")
 
-# Cliente da Groq
+# Cliente Groq com fallback para secrets
 client = Groq(api_key=os.environ.get("GROQ_API", st.secrets["GROQ_API"]))
 
-# Função principal para responder ao usuário
+# Função principal de resposta
 def responder_usuario(pergunta):
-    # Busca nos três vetores
-    docs_faq = retriever_faq.invoke(pergunta)
-    docs_pdf = retriever_pdf.invoke(pergunta)
-    docs_planos = retriever_planos.invoke(pergunta)
+    if not retriever_faq and not retriever_pdf and not retriever_planos:
+        return (
+            "⚠️ Os arquivos vetoriais ainda não foram carregados. "
+            "Acesse a aba 'Files' e envie as pastas `vectorstore/faq_index/`, `legal_index/` e `planos_index/`. "
+            "Depois clique em 'Rerun'.", False
+        )
 
-    # Se nenhum contexto for encontrado
+    # Busca em cada fonte
+    docs_faq = retriever_faq.invoke(pergunta) if retriever_faq else []
+    docs_pdf = retriever_pdf.invoke(pergunta) if retriever_pdf else []
+    docs_planos = retriever_planos.invoke(pergunta) if retriever_planos else []
+
+    # Se nenhum resultado
     if not docs_faq and not docs_pdf and not docs_planos:
         return ("🤔 Hmm... não encontrei nada sobre isso nos meus arquivos. Mas já registrei sua dúvida! 😉", False)
 
-    # Junta os conteúdos encontrados
+    # Junta o conteúdo dos documentos retornados
     contexto = "\n\n".join([doc.page_content for doc in docs_faq + docs_pdf + docs_planos])
 
     prompt = f"""
 Você é o JOTHA, assistente virtual da Coordenação de Estágio do IF Sudeste MG - Campus Barbacena.
-Responda com simpatia, clareza e base apenas no contexto abaixo. Nunca invente nada.
+Responda com simpatia, clareza e base apenas no contexto abaixo. Nunca invente.
 
 Contexto:
 {contexto}
@@ -56,7 +69,7 @@ Resposta:
 
     return response.choices[0].message.content.strip(), True
 
-# Função para registrar perguntas não respondidas
+# Registra perguntas não respondidas
 def registrar_pergunta_nao_respondida(pergunta):
     arquivo = "nao_respondidas.csv"
     if os.path.exists(arquivo):
