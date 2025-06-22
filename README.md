@@ -34,7 +34,7 @@ Editar
 GROQ_API = "sua-chave-aqui"
 
 [admin]
-acesso = "jotha123"
+acesso = "senha-do-painel-aqui"
 3. Prepare os dados:
 Coloque seu faq.csv em data/
 
