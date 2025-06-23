@@ -104,7 +104,7 @@ def responder_usuario(pergunta):
             "Depois clique em 'Rerun'.", False
         )
 
-    docs_faq = retriever_faq.get_relevant_documents(pergunta)[:1] if retriever_faq else []
+    docs_faq = retriever_faq.get_relevant_documents(pergunta)[:3] if retriever_faq else []
     docs_pdf = retriever_pdf.get_relevant_documents(pergunta)[:1] if retriever_pdf else []
     docs_planos = retriever_planos.get_relevant_documents(pergunta)[:4] if retriever_planos else []
 
@@ -112,7 +112,7 @@ def responder_usuario(pergunta):
     if curso_detectado:
         def curso_aproxima(doc):
             curso_doc = doc.metadata.get("curso", "").lower()
-            return bool(get_close_matches(curso_detectado, [curso_doc], n=1, cutoff=0.6))
+            return bool(get_close_matches(curso_detectado, [curso_doc], n=1, cutoff=0.75))
 
         docs_planos = [doc for doc in docs_planos if curso_aproxima(doc)]
 
