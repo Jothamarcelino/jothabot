@@ -1,31 +1,75 @@
 import os
+import re
 import pandas as pd
 import streamlit as st
 from groq import Groq
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain.schema import Document
+from difflib import get_close_matches
 
-# Tenta carregar vetor com tratamento de erro
-def tentar_carregar_retriever(path):
-    try:
-        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
-        retriever = FAISS.load_local(path, embeddings, allow_dangerous_deserialization=True).as_retriever()
-        return retriever
-    except Exception as e:
-        print(f"⚠️ Não foi possível carregar vetores de: {path} → {e}")
-        return None
+# Inicializa cliente Groq
+client = Groq(api_key=st.secrets["GROQ_API"])
 
-# Carrega os três repositórios vetoriais (FAQ, Leis, PPCs)
-retriever_faq = tentar_carregar_retriever("vectorstore/faq_index")
-retriever_pdf = tentar_carregar_retriever("vectorstore/legal_index")
-retriever_planos = tentar_carregar_retriever("vectorstore/planos_index")
+# Função auxiliar para carregar vetores
+@st.cache_resource(show_spinner=False)
+def carregar_retriever(path):
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+    return FAISS.load_local(path, embeddings, allow_dangerous_deserialization=True).as_retriever()
 
-# Cliente Groq com fallback para secrets
-client = Groq(api_key=os.environ.get("GROQ_API", st.secrets["GROQ_API"]))
+# Carrega os retrievers
+retriever_faq = carregar_retriever("vectorstore/faq_index")
+retriever_pdf = carregar_retriever("vectorstore/legal_index")
+retriever_planos = carregar_retriever("vectorstore/planos_index")
+
+# Armazena informações importantes da sessão
+informacoes_chave = {
+    "curso": None,
+    "nome": None,
+    "tipo_estagio": None,
+}
+
+# Exibe informações memorizadas para o usuário
+def exibir_resumo_memoria():
+    st.markdown("### ℹ️ Informações que já memorizo nesta sessão:")
+    curso = st.session_state.get("curso", "🔍 Não identificado")
+    nome = st.session_state.get("nome", "🕵️ Não informado")
+    tipo = st.session_state.get("tipo_estagio", "📄 Não especificado")
+
+    st.markdown(f"""
+    - 👤 **Nome:** {nome}
+    - 🎓 **Curso:** {curso}
+    - 📄 **Tipo de Estágio:** {tipo}
+    """)
+
+# Extrai e memoriza informações da pergunta
+def memorizar_informacoes_chave(pergunta):
+    texto = pergunta.lower()
+
+    # Detecta nome
+    if "meu nome é" in texto:
+        partes = texto.split("meu nome é")
+        if len(partes) > 1:
+            nome = partes[1].strip().split()[0]
+            st.session_state["nome"] = nome
+
+    # Detecta tipo de estágio
+    if "obrigatório" in texto:
+        st.session_state["tipo_estagio"] = "obrigatório"
+    elif "não obrigatório" in texto or "nao obrigatório" in texto:
+        st.session_state["tipo_estagio"] = "não obrigatório"
+
+    # Detecta curso via metadados
+    documentos = retriever_planos.vectorstore.docstore._dict.values()
+    cursos_existentes = list({doc.metadata.get("curso", "") for doc in documentos})
+    melhores = get_close_matches(texto, cursos_existentes, n=1, cutoff=0.5)
+    if melhores:
+        st.session_state["curso"] = melhores[0]
 
 # Função principal de resposta
 def responder_usuario(pergunta):
+    memorizar_informacoes_chave(pergunta)
+
     if not retriever_faq and not retriever_pdf and not retriever_planos:
         return (
             "⚠️ Os arquivos vetoriais ainda não foram carregados. "
@@ -33,34 +77,30 @@ def responder_usuario(pergunta):
             "Depois clique em 'Rerun'.", False
         )
 
-    # 🔍 Prioriza FAQ
+    # Recupera documentos das três fontes
     docs_faq = retriever_faq.get_relevant_documents(pergunta)[:1] if retriever_faq else []
+    docs_pdf = retriever_pdf.get_relevant_documents(pergunta)[:1] if retriever_pdf else []
+    docs_planos = retriever_planos.get_relevant_documents(pergunta)[:4] if retriever_planos else []
 
-    if docs_faq:
-        contexto = "\n\n".join([doc.page_content for doc in docs_faq])
-    else:
-        # Caso FAQ não encontre, busca nas leis e planos
-        docs_pdf = retriever_pdf.get_relevant_documents(pergunta)[:1] if retriever_pdf else []
-        docs_planos = retriever_planos.get_relevant_documents(pergunta)[:1] if retriever_planos else []
+    # Aplica filtragem por curso, se houver curso na sessão
+    curso_detectado = st.session_state.get("curso")
+    if curso_detectado:
+        docs_planos = [doc for doc in docs_planos if curso_detectado in doc.metadata.get("curso", "")]
 
-        if not docs_pdf and not docs_planos:
-            return ("🤔 Hmm... não encontrei nada sobre isso nos meus arquivos. Mas já registrei sua dúvida! 😉", False)
+    # Se nenhum resultado
+    if not docs_faq and not docs_pdf and not docs_planos:
+        return ("🤔 Hmm... não encontrei nada sobre isso nos meus arquivos. Mas já registrei sua dúvida! 😉", False)
 
-        contexto = "\n\n".join([doc.page_content for doc in docs_pdf + docs_planos])
+    # Monta o contexto
+    contexto = "\n\n".join([doc.page_content for doc in docs_faq + docs_pdf + docs_planos])[:15000]
 
-    # 🔒 Limita tamanho
-    contexto = contexto[:15000]
-
-    # 🧠 Prompt reforçado
     prompt = f"""
 Você é o JOTHA, assistente virtual da Coordenação de Estágio do IF Sudeste MG - Campus Barbacena.
+Seja divertido, responda com simpatia, use emoticons. As respostas devem ser com clareza e base apenas no contexto abaixo.
+Sua missão é **responder somente com base no contexto abaixo**, que foi recuperado dos documentos oficiais e da base de perguntas frequentes. **Não invente, não complemente e não improvise, mas seja divertido.**
 
-Responda com simpatia, clareza e **base apenas no contexto abaixo**. Não invente, não complemente e não improvise.  
-Seja útil e direto, mas mantenha um tom acolhedor e divertido.
-
-⚠️ Regras:
-- Use exatamente o que estiver no contexto, especialmente se houver HTML.
-- Se não encontrar resposta, diga que não encontrou e oriente o usuário a procurar a Coordenação de Estágio.
+- Se a resposta estiver no contexto, use exatamente o que estiver escrito lá.
+- Se não encontrar a resposta no contexto, diga educadamente que não encontrou e oriente o usuário a entrar em contato com a Coordenação de Estágio.
 
 Contexto:
 {contexto}
@@ -74,7 +114,7 @@ Resposta:
     response = client.chat.completions.create(
         model="llama3-8b-8192",
         messages=[
-            {"role": "system", "content": "Você responde em português, com gentileza, precisão e sem inventar informações."},
+            {"role": "system", "content": "Você responde em português, com gentileza e precisão."},
             {"role": "user", "content": prompt}
         ],
         temperature=0.3,
@@ -83,14 +123,12 @@ Resposta:
 
     return response.choices[0].message.content.strip(), True
 
-# Registra perguntas não respondidas
+# Função para registrar perguntas não respondidas
 def registrar_pergunta_nao_respondida(pergunta):
-    arquivo = "nao_respondidas.csv"
-    if os.path.exists(arquivo):
-        df = pd.read_csv(arquivo)
-    else:
-        df = pd.DataFrame(columns=["pergunta"])
+    if "nao_respondido.csv" not in os.listdir("data"):
+        pd.DataFrame(columns=["pergunta"]).to_csv("data/nao_respondido.csv", index=False)
 
-    nova_linha = pd.DataFrame([{"pergunta": pergunta}])
-    df = pd.concat([df, nova_linha], ignore_index=True)
-    df.to_csv(arquivo, index=False)
+    df = pd.read_csv("data/nao_respondido.csv")
+    if pergunta not in df["pergunta"].values:
+        df.loc[len(df)] = [pergunta]
+        df.to_csv("data/nao_respondido.csv", index=False)

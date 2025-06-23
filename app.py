@@ -1,6 +1,7 @@
 import streamlit as st
 from utils import responder_usuario, registrar_pergunta_nao_respondida
 import pandas as pd
+from utils import exibir_resumo_memoria
 import os
 
 st.set_page_config(page_title="JOTHA 2.0", layout="wide")
@@ -13,6 +14,7 @@ acesso_autorizado = senha == st.secrets["admin"]["acesso"]
 
 # Entrada do usuário
 pergunta = st.chat_input("Digite sua pergunta sobre estágio, leis ou PPCs...")
+exibir_resumo_memoria()
 
 if pergunta:
     with st.chat_message("Usuário"):

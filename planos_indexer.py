@@ -1,32 +1,86 @@
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
+import os
+import re
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import CharacterTextSplitter
-import os
+from langchain.vectorstores import FAISS
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain.schema import Document
 
-# Caminho da pasta com os planos de curso (PDFs)
-pasta_planos = "data/planos/"
+# Diretório com os PPCs
+DIRETORIO_PLANOS = "data/planos"
+SAIDA_VECTORSTORE = "vectorstore/planos_index"
 
-# Lista os arquivos PDF da pasta
-pdfs = [f for f in os.listdir(pasta_planos) if f.endswith(".pdf")]
+# Função para detectar automaticamente o nome do curso
+def extrair_nome_do_curso(texto: str) -> str:
+    texto = texto.replace("\n", " ").replace("  ", " ").upper()
 
-all_docs = []
+    padroes = [
+        r"T[ÉE]CNICO EM ((?:[A-ZÀ-Ÿ]{2,}(?: [A-ZÀ-Ÿ]{2,}){0,5}))",
+        r"BACHARELADO EM ((?:[A-ZÀ-Ÿ]{2,}(?: [A-ZÀ-Ÿ]{2,}){0,5}))",
+        r"LICENCIATURA EM ((?:[A-ZÀ-Ÿ]{2,}(?: [A-ZÀ-Ÿ]{2,}){0,5}))",
+        r"GRADUAÇÃO EM ((?:[A-ZÀ-Ÿ]{2,}(?: [A-ZÀ-Ÿ]{2,}){0,5}))",
+        r"TECNOLOGIA EM ((?:[A-ZÀ-Ÿ]{2,}(?: [A-ZÀ-Ÿ]{2,}){0,5}))",
+        r"CURSO DE ((?:[A-ZÀ-Ÿ]{2,}(?: [A-ZÀ-Ÿ]{2,}){0,5}))",
+        r"CURSO SUPERIOR EM ((?:[A-ZÀ-Ÿ]{2,}(?: [A-ZÀ-Ÿ]{2,}){0,5}))",
+        r"PROJETO PEDAG[ÓO]GICO DO CURSO DE ((?:[A-ZÀ-Ÿ]{2,}(?: [A-ZÀ-Ÿ]{2,}){0,5}))",
+    ]
 
-for pdf in pdfs:
-    caminho_pdf = os.path.join(pasta_planos, pdf)
-    loader = PyPDFLoader(caminho_pdf)
-    docs = loader.load()
-    all_docs.extend(docs)
+    for padrao in padroes:
+        match = re.search(padrao, texto)
+        if match:
+            nome = match.group(1).strip()
 
-# Divide os documentos em pedaços menores
-splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=20)
-chunks = splitter.split_documents(all_docs)
+            # Remoção de sufixos irrelevantes
+            lixo = [
+                "MODALIDADE", "CAMPUS", "PROJETO", "INSTITUTO",
+                "COORDENADOR", "PROFESSOR", "REITOR",
+                "DEPARTAMENTO", "NÚCLEO", "UNIDADE"
+            ]
+            for palavra in lixo:
+                if palavra in nome:
+                    nome = nome.split(palavra)[0].strip()
 
-# Gera os embeddings
+            return nome.lower().replace(" ", "_")
+
+    # Fallback: busca por termos conhecidos
+    termos_famosos = ["AGRONOMIA", "TURISMO", "QUÍMICA", "COMPUTAÇÃO", "ENFERMAGEM", "ALIMENTOS"]
+    for termo in termos_famosos:
+        if termo in texto:
+            return termo.lower().replace(" ", "_")
+
+    return "desconhecido"
+
+# Inicializa embeddings
 embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
-# Cria e salva o índice vetorial FAISS
-db = FAISS.from_documents(chunks, embedding=embeddings)
-db.save_local("vectorstore/planos_index")
+# Coleta documentos vetorizados
+todos_chunks = []
 
-print("✅ Vetorização dos Planos de Curso concluída.")
+for nome_arquivo in os.listdir(DIRETORIO_PLANOS):
+    caminho = os.path.join(DIRETORIO_PLANOS, nome_arquivo)
+    if not nome_arquivo.endswith(".pdf"):
+        continue
+
+    print(f"📄 Lendo {nome_arquivo}...")
+
+    loader = PyPDFLoader(caminho)
+    docs = loader.load()
+
+    # Usa as 2 primeiras páginas para detectar o nome do curso
+    primeiras_paginas = " ".join([doc.page_content for doc in docs[:2]])
+    nome_curso = extrair_nome_do_curso(primeiras_paginas)
+    print(f"🔍 Curso identificado: {nome_curso}")
+
+    # Adiciona metadado do curso
+    for doc in docs:
+        doc.metadata["curso"] = nome_curso
+
+    splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+    chunks = splitter.split_documents(docs)
+    todos_chunks.extend(chunks)
+
+# Cria a base vetorial
+print("⚙️ Gerando base vetorial dos planos...")
+db = FAISS.from_documents(todos_chunks, embedding=embeddings)
+db.save_local(SAIDA_VECTORSTORE)
+print("✅ Vetorização dos Planos de Curso concluída com metadados automáticos!")
