@@ -29,6 +29,34 @@ informacoes_chave = {
     "tipo_estagio": None,
 }
 
+# Entrevista inicial
+def entrevista_inicial():
+    st.markdown("### 👋 Olá, eu sou o JOTHA!")
+    st.markdown("Seja bem-vindo ao assistente da Coordenação de Estágio do IF Sudeste MG - Campus Barbacena! 🎓")
+
+    if "nome" not in st.session_state:
+        nome = st.text_input("👤 Qual é o seu nome?")
+        if nome:
+            st.session_state["nome"] = nome
+            st.rerun()
+        st.stop()
+
+    if "curso" not in st.session_state:
+        curso = st.text_input("🎓 Qual o seu curso?")
+        if curso:
+            st.session_state["curso"] = curso
+            st.rerun()
+        st.stop()
+
+    if "tipo_estagio" not in st.session_state:
+        tipo = st.radio("📄 Qual tipo de atividade você tem dúvidas?", ["obrigatório", "não obrigatório", "horas complementares"])
+        if tipo:
+            st.session_state["tipo_estagio"] = tipo
+            st.rerun()
+        st.stop()
+
+    st.success("Pronto, agora é só mandar sua pergunta! 💬")
+
 # Exibe informações memorizadas para o usuário
 def exibir_resumo_memoria():
     st.markdown("### ℹ️ Informações que já memorizo nesta sessão:")
@@ -43,23 +71,21 @@ def exibir_resumo_memoria():
     """)
 
 # Extrai e memoriza informações da pergunta
+
 def memorizar_informacoes_chave(pergunta):
     texto = pergunta.lower()
 
-    # Detecta nome
     if "meu nome é" in texto:
         partes = texto.split("meu nome é")
         if len(partes) > 1:
             nome = partes[1].strip().split()[0]
             st.session_state["nome"] = nome
 
-    # Detecta tipo de estágio
     if "obrigatório" in texto:
         st.session_state["tipo_estagio"] = "obrigatório"
     elif "não obrigatório" in texto or "nao obrigatório" in texto:
         st.session_state["tipo_estagio"] = "não obrigatório"
 
-    # Detecta curso via metadados
     documentos = retriever_planos.vectorstore.docstore._dict.values()
     cursos_existentes = list({doc.metadata.get("curso", "") for doc in documentos})
     melhores = get_close_matches(texto, cursos_existentes, n=1, cutoff=0.5)
@@ -67,6 +93,7 @@ def memorizar_informacoes_chave(pergunta):
         st.session_state["curso"] = melhores[0]
 
 # Função principal de resposta
+
 def responder_usuario(pergunta):
     memorizar_informacoes_chave(pergunta)
 
@@ -77,21 +104,17 @@ def responder_usuario(pergunta):
             "Depois clique em 'Rerun'.", False
         )
 
-    # Recupera documentos das três fontes
     docs_faq = retriever_faq.get_relevant_documents(pergunta)[:1] if retriever_faq else []
     docs_pdf = retriever_pdf.get_relevant_documents(pergunta)[:1] if retriever_pdf else []
     docs_planos = retriever_planos.get_relevant_documents(pergunta)[:4] if retriever_planos else []
 
-    # Aplica filtragem por curso, se houver curso na sessão
     curso_detectado = st.session_state.get("curso")
     if curso_detectado:
         docs_planos = [doc for doc in docs_planos if curso_detectado in doc.metadata.get("curso", "")]
 
-    # Se nenhum resultado
     if not docs_faq and not docs_pdf and not docs_planos:
         return ("🤔 Hmm... não encontrei nada sobre isso nos meus arquivos. Mas já registrei sua dúvida! 😉", False)
 
-    # Monta o contexto
     contexto = "\n\n".join([doc.page_content for doc in docs_faq + docs_pdf + docs_planos])[:15000]
 
     prompt = f"""
@@ -124,6 +147,7 @@ Resposta:
     return response.choices[0].message.content.strip(), True
 
 # Função para registrar perguntas não respondidas
+
 def registrar_pergunta_nao_respondida(pergunta):
     if "nao_respondido.csv" not in os.listdir("data"):
         pd.DataFrame(columns=["pergunta"]).to_csv("data/nao_respondido.csv", index=False)
