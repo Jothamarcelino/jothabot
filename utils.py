@@ -108,9 +108,13 @@ def responder_usuario(pergunta):
     docs_pdf = retriever_pdf.get_relevant_documents(pergunta)[:1] if retriever_pdf else []
     docs_planos = retriever_planos.get_relevant_documents(pergunta)[:4] if retriever_planos else []
 
-    curso_detectado = st.session_state.get("curso")
+    curso_detectado = st.session_state.get("curso", "").lower()
     if curso_detectado:
-        docs_planos = [doc for doc in docs_planos if curso_detectado in doc.metadata.get("curso", "")]
+        def curso_aproxima(doc):
+            curso_doc = doc.metadata.get("curso", "").lower()
+            return bool(get_close_matches(curso_detectado, [curso_doc], n=1, cutoff=0.6))
+
+        docs_planos = [doc for doc in docs_planos if curso_aproxima(doc)]
 
     if not docs_faq and not docs_pdf and not docs_planos:
         return ("🤔 Hmm... não encontrei nada sobre isso nos meus arquivos. Mas já registrei sua dúvida! 😉", False)
