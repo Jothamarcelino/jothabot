@@ -1,5 +1,6 @@
 import streamlit as st
 from utils import responder_usuario, registrar_pergunta_nao_respondida, exibir_resumo_memoria, entrevista_inicial
+import pandas as pd
 
 st.set_page_config(page_title="JOTHA 2.0", layout="wide")
 st.title("🤖 JOTHA 2.0 - Assistente da Coordenação de Estágio")
