@@ -14,28 +14,27 @@ df = pd.read_csv(csv_path)
 docs = []
 
 for _, row in df.iterrows():
-    pergunta = str(row[0])
-    resposta_html = str(row[1])
-    palavras_chave = str(row[2]) if len(row) > 2 else ""
-    
-    # Texto que será vetorizado (pergunta + palavras-chave)
-    texto_para_busca = pergunta + " " + palavras_chave
-    
-    # Criamos um "documento" com o conteúdo que será exibido
+    pergunta = str(row[0]).strip()
+    resposta_html = str(row[1]).strip()
+    palavras_chave = str(row[2]).strip() if len(row) > 2 else ""
+
+    # Texto para vetorização = pergunta + palavras-chave + resposta (mas só usamos a resposta na exibição final)
+    texto_para_vetor = f"{pergunta}. Palavras-chave: {palavras_chave}. Resposta: {resposta_html}"
+
     doc = Document(
-        page_content=resposta_html,
-        metadata={"input": texto_para_busca}
+        page_content=resposta_html,  # Mostra apenas a resposta
+        metadata={"input": texto_para_vetor}  # Usa o conteúdo estendido para a busca vetorial
     )
     docs.append(doc)
 
-# Divide os documentos em pedaços pequenos
+# Divide os documentos
 splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=20)
 chunks = splitter.split_documents(docs)
 
-# Gera os embeddings
+# Gera embeddings
 embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
-# Cria e salva o vetor FAISS
+# Cria e salva FAISS
 db = FAISS.from_documents(chunks, embedding=embeddings)
 db.save_local("vectorstore/faq_index")
 
