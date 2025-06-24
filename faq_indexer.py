@@ -1,41 +1,43 @@
-import pandas as pd
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain.schema import Document
-from langchain.text_splitter import CharacterTextSplitter
 import os
+import re
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.vectorstores import FAISS
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.documents import Document
 
-# Caminho do CSV
-csv_path = "data/faq.csv"
+# Caminho do PDF do FAQ
+pdf_path = "data/faq.pdf"
 
-# Carrega o CSV com perguntas (coluna A), respostas (coluna B) e palavras-chave (coluna C)
-df = pd.read_csv(csv_path)
+# Carrega o PDF
+loader = PyPDFLoader(pdf_path)
+pages = loader.load()
 
+# Junta todas as páginas em um único texto
+conteudo_total = "\n".join([p.page_content for p in pages])
+
+# Divide o texto por seções numeradas (1. Título...)
+# Garante que não perca o número durante a divisão
+blocos = re.split(r"(?=\n\d{1,3}\.\s)", conteudo_total)
+
+# Converte em objetos Document
 docs = []
-
-for _, row in df.iterrows():
-    pergunta = str(row[0])
-    resposta_html = str(row[1])
-    palavras_chave = str(row[2]) if len(row) > 2 else ""
-    
-    # Campo que será usado para a busca semântica
-    texto_para_busca = pergunta + " " + palavras_chave
-    
-    doc = Document(
-        page_content=resposta_html,
-        metadata={"input": texto_para_busca}
-    )
+for bloco in blocos:
+    texto = bloco.strip()
+    if len(texto) < 50:
+        continue
+    doc = Document(page_content=texto, metadata={"fonte": "faq"})
     docs.append(doc)
 
-# Divide os documentos em pedaços
-splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=20)
-chunks = splitter.split_documents(docs)
+print(f"📄 Total de documentos extraídos do FAQ: {len(docs)}")
 
-# Embeddings
+# Gera os embeddings
 embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
-# Cria e salva FAISS
-db = FAISS.from_documents(chunks, embedding=embeddings)
+# Cria base vetorial FAISS
+db = FAISS.from_documents(docs, embedding=embeddings)
+
+# Salva a base vetorial
+os.makedirs("vectorstore/faq_index", exist_ok=True)
 db.save_local("vectorstore/faq_index")
 
-print("✅ Vetorização do FAQ concluída.")
+print("✅ FAQ vetorizado com sucesso a partir do PDF!")

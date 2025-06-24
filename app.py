@@ -1,5 +1,5 @@
 import streamlit as st
-from utils import responder_usuario, registrar_pergunta_nao_respondida, exibir_resumo_memoria, entrevista_inicial
+from utils import responder_usuario, registrar_pergunta_nao_respondida
 import pandas as pd
 
 st.set_page_config(page_title="JOTHA 2.0", layout="wide")
@@ -9,12 +9,6 @@ st.sidebar.image("https://bit.ly/jotha-aberto", width=100)
 st.sidebar.markdown("### 📊 Painel de Gerenciamento")
 senha = st.sidebar.text_input("🔐 Digite a senha do painel:", type="password")
 acesso_autorizado = senha == st.secrets["admin"]["acesso"]
-
-# Executa a entrevista inicial com o usuário
-entrevista_inicial()
-
-# Exibe resumo da sessão
-exibir_resumo_memoria()
 
 st.markdown("""
 ## 🤖 Faça sua pergunta ao JOTHA:
