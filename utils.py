@@ -1,10 +1,17 @@
 import os
 import pandas as pd
 import streamlit as st
+import unicodedata
 from groq import Groq
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores.utils import cosine_similarity
+
+# Função para normalizar strings (remove acentos, converte para minúsculas e substitui espaços por underline)
+def normalize_string(s: str) -> str:
+    s = s.lower()
+    s = ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+    return s.replace(" ", "_")
 
 # Inicializa o cliente Groq
 client = Groq(api_key=st.secrets["GROQ_API"])
@@ -28,17 +35,19 @@ def buscar_faq_exata(pergunta):
     if not docs:
         return None
 
-    curso_usuario = st.session_state.get("curso", "").strip().lower()
+    curso_usuario = normalize_string(st.session_state.get("curso", ""))
     pergunta_embedding = retriever_faq.vectorstore.embedding_function.embed_query(pergunta)
 
     melhor_doc = None
     melhor_score = -1
 
     for doc in docs:
-        curso_doc = doc.metadata.get("curso", "geral").strip().lower()
-        if curso_doc not in ["geral", curso_usuario]:
+        curso_doc = normalize_string(doc.metadata.get("curso", "geral"))
+        # Considera válido se o documento for "geral" ou se houver correspondência parcial
+        if curso_doc != "geral" and (curso_usuario not in curso_doc and curso_doc not in curso_usuario):
             continue
 
+        # Usa o metadado "input" se existir; caso contrário, pega os primeiros 200 caracteres do conteúdo
         texto_referencia = doc.metadata.get("input", "") or doc.page_content[:200]
         doc_embedding = retriever_faq.vectorstore.embedding_function.embed_query(texto_referencia)
         score = cosine_similarity([pergunta_embedding], [doc_embedding])[0][0]
@@ -51,6 +60,16 @@ def buscar_faq_exata(pergunta):
         return melhor_doc
     return None
 
+# Função para filtrar documentos por curso, permitindo "geral" como fallback
+def filtrar_por_curso(docs, curso_usuario):
+    filtrados = []
+    norm_usuario = normalize_string(curso_usuario)
+    for doc in docs:
+        curso_doc = normalize_string(doc.metadata.get("curso", "geral"))
+        if curso_doc == "geral" or norm_usuario in curso_doc or curso_doc in norm_usuario:
+            filtrados.append(doc)
+    return filtrados
+
 # Função principal de resposta do JOTHA
 def responder_usuario(pergunta):
     if not retriever_faq and not retriever_pdf and not retriever_planos:
@@ -60,40 +79,38 @@ def responder_usuario(pergunta):
             False,
         )
 
-    curso_usuario = st.session_state.get("curso", "").strip().lower()
-    contexto_usuario = f"O usuário é do curso {curso_usuario.replace('_', ' ').title()}.\n" if curso_usuario else ""
+    curso_usuario = st.session_state.get("curso", "").strip()
+    contexto_usuario = (
+        f"O usuário é do curso {curso_usuario.replace('_', ' ').title()}.\n"
+        if curso_usuario
+        else ""
+    )
 
     # Tenta responder via FAQ com busca exata
     doc_exato = buscar_faq_exata(pergunta)
     if doc_exato:
         return doc_exato.page_content.strip(), True
 
-    # Recupera documentos dos planos e das leis com base no curso do usuário
-    def filtrar_por_curso(docs, fonte):
-        filtrados = []
-        for doc in docs:
-            curso_doc = doc.metadata.get("curso", "geral").strip().lower()
-            if curso_doc == "geral" or curso_doc == curso_usuario:
-                filtrados.append(doc)
-        return filtrados
-
-    docs_faq = filtrar_por_curso(retriever_faq.get_relevant_documents(pergunta), "faq")
+    # Recupera documentos dos três retrievers e filtra pelo curso
+    docs_faq = filtrar_por_curso(retriever_faq.get_relevant_documents(pergunta), curso_usuario)
     docs_pdf = retriever_pdf.get_relevant_documents(pergunta)
-    docs_planos = filtrar_por_curso(retriever_planos.get_relevant_documents(pergunta), "planos")
+    docs_planos = filtrar_por_curso(retriever_planos.get_relevant_documents(pergunta), curso_usuario)
 
+    # Se nenhum documento for encontrado, retorna mensagem de dúvida
     if not docs_faq and not docs_pdf and not docs_planos:
         return (
             "🤔 Hmm... não encontrei nada sobre isso nos meus arquivos. Mas já registrei sua dúvida! 😉",
             False,
         )
 
-    # Contexto combinado para o prompt
+    # Concatena conteúdos dos documentos para formar o contexto, limitando o tamanho
     contexto = "\n\n".join(
         [doc.page_content for doc in (docs_faq[:2] + docs_pdf[:2] + docs_planos[:3])]
     )[:15000]
 
     historico = ""
     if "chat_history" in st.session_state:
+        # Limita ao histórico das últimas 6 mensagens
         historico = "\n".join(
             [f"{entry['role']}: {entry['content']}" for entry in st.session_state.chat_history[-6:]]
         )
