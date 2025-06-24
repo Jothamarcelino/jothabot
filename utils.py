@@ -104,22 +104,26 @@ def responder_usuario(pergunta):
             "Depois clique em 'Rerun'.", False
         )
 
-    docs_faq = retriever_faq.get_relevant_documents(pergunta)[:3] if retriever_faq else []
+    # --- 🔍 Etapa 1: Busca no FAQ com verificação de similaridade
+    resultados_faq = retriever_faq.vectorstore.similarity_search_with_score(pergunta, k=1)
+    if resultados_faq:
+        doc, score = resultados_faq[0]
+        if score > 0.85:
+            return doc.page_content.strip(), True  # 🔁 Retorno imediato da resposta HTML do FAQ
+
+    # --- 🔍 Etapa 2: Busca complementar nos PDFs e Planos
     docs_pdf = retriever_pdf.get_relevant_documents(pergunta)[:1] if retriever_pdf else []
     docs_planos = retriever_planos.get_relevant_documents(pergunta)[:4] if retriever_planos else []
 
-    curso_detectado = st.session_state.get("curso", "").lower()
+    curso_detectado = st.session_state.get("curso")
     if curso_detectado:
-        def curso_aproxima(doc):
-            curso_doc = doc.metadata.get("curso", "").lower()
-            return bool(get_close_matches(curso_detectado, [curso_doc], n=1, cutoff=0.75))
+        docs_planos = [doc for doc in docs_planos if curso_detectado.lower() in doc.metadata.get("curso", "").lower()]
 
-        docs_planos = [doc for doc in docs_planos if curso_aproxima(doc)]
-
-    if not docs_faq and not docs_pdf and not docs_planos:
+    if not docs_pdf and not docs_planos:
         return ("🤔 Hmm... não encontrei nada sobre isso nos meus arquivos. Mas já registrei sua dúvida! 😉", False)
 
-    contexto = "\n\n".join([doc.page_content for doc in docs_faq + docs_pdf + docs_planos])[:15000]
+    # --- 🔧 Etapa 3: Monta o prompt com os documentos encontrados
+    contexto = "\n\n".join([doc.page_content for doc in docs_pdf + docs_planos])[:15000]
 
     prompt = f"""
 Você é o JOTHA, assistente virtual da Coordenação de Estágio do IF Sudeste MG - Campus Barbacena.
@@ -149,6 +153,7 @@ Resposta:
     )
 
     return response.choices[0].message.content.strip(), True
+
 
 # Função para registrar perguntas não respondidas
 
