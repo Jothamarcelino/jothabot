@@ -35,7 +35,7 @@ Digite abaixo sua dúvida relacionada ao estágio, leis ou PPCs.
 pergunta = st.chat_input("Digite sua pergunta...")
 
 if pergunta:
-    # Armazena pergunta no histórico
+    # Armazena pergunta no histórico e a exibe usando st.chat_message
     st.session_state.chat_history.append({"role": "Usuário", "content": pergunta})
     with st.chat_message("Usuário"):
         st.markdown(pergunta)
@@ -43,7 +43,7 @@ if pergunta:
     with st.spinner("JOTHA pensando 🤔..."):
         resposta, encontrado = responder_usuario(pergunta)
         
-        # Armazena resposta no histórico
+        # Armazena resposta no histórico e a exibe
         st.session_state.chat_history.append({"role": "JOTHA", "content": resposta})
         with st.chat_message("JOTHA"):
             st.markdown(resposta, unsafe_allow_html=True)
@@ -51,10 +51,10 @@ if pergunta:
         if not encontrado:
             registrar_pergunta_nao_respondida(pergunta)
 
-# Exibe o histórico da conversa para referência
-if st.session_state.chat_history:
-    st.markdown("---")
-    st.write("### Histórico da Conversa")
+# **Opção 1:** Não exibir o histórico duplicado, pois as mensagens já aparecem em seu fluxo
+
+# **Opção 2 (opcional):** Se você quiser disponibilizar o histórico completo em um expander, use:
+with st.expander("Ver Histórico Completo da Conversa", expanded=False):
     for entry in st.session_state.chat_history:
         if entry["role"] == "Usuário":
             st.markdown(f"**Usuário:** {entry['content']}")
