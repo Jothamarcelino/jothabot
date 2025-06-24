@@ -7,6 +7,9 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain.schema import Document
 from difflib import get_close_matches
+from langchain_core.documents import Document as LCDocument
+from langchain_community.vectorstores.utils import cosine_similarity
+import numpy as np
 
 # Inicializa cliente Groq
 client = Groq(api_key=st.secrets["GROQ_API"])
@@ -92,8 +95,29 @@ def memorizar_informacoes_chave(pergunta):
     if melhores:
         st.session_state["curso"] = melhores[0]
 
-# Função principal de resposta
+# Busca precisa no FAQ com verificação de similaridade manual
+def buscar_faq_exata(pergunta):
+    docs = retriever_faq.vectorstore.similarity_search(pergunta, k=5)
+    if not docs:
+        return None
 
+    pergunta_embedding = retriever_faq.vectorstore.embedding_function.embed_query(pergunta)
+    melhor_doc = None
+    melhor_score = -1
+
+    for doc in docs:
+        texto_referencia = doc.metadata.get("input", "")
+        doc_embedding = retriever_faq.vectorstore.embedding_function.embed_query(texto_referencia)
+        score = cosine_similarity([pergunta_embedding], [doc_embedding])[0][0]
+        if score > melhor_score:
+            melhor_doc = doc
+            melhor_score = score
+
+    if melhor_score > 0.90:
+        return melhor_doc
+    return None
+
+# Função principal de resposta
 def responder_usuario(pergunta):
     memorizar_informacoes_chave(pergunta)
 
@@ -104,14 +128,10 @@ def responder_usuario(pergunta):
             "Depois clique em 'Rerun'.", False
         )
 
-    # --- 🔍 Etapa 1: Busca no FAQ com verificação de similaridade
-    resultados_faq = retriever_faq.vectorstore.similarity_search_with_score(pergunta, k=1)
-    if resultados_faq:
-        doc, score = resultados_faq[0]
-        if score > 0.85:
-            return doc.page_content.strip(), True  # 🔁 Retorno imediato da resposta HTML do FAQ
+    doc_exato = buscar_faq_exata(pergunta)
+    if doc_exato:
+        return doc_exato.page_content.strip(), True
 
-    # --- 🔍 Etapa 2: Busca complementar nos PDFs e Planos
     docs_pdf = retriever_pdf.get_relevant_documents(pergunta)[:1] if retriever_pdf else []
     docs_planos = retriever_planos.get_relevant_documents(pergunta)[:4] if retriever_planos else []
 
@@ -122,7 +142,6 @@ def responder_usuario(pergunta):
     if not docs_pdf and not docs_planos:
         return ("🤔 Hmm... não encontrei nada sobre isso nos meus arquivos. Mas já registrei sua dúvida! 😉", False)
 
-    # --- 🔧 Etapa 3: Monta o prompt com os documentos encontrados
     contexto = "\n\n".join([doc.page_content for doc in docs_pdf + docs_planos])[:15000]
 
     prompt = f"""
@@ -154,9 +173,7 @@ Resposta:
 
     return response.choices[0].message.content.strip(), True
 
-
 # Função para registrar perguntas não respondidas
-
 def registrar_pergunta_nao_respondida(pergunta):
     if "nao_respondido.csv" not in os.listdir("data"):
         pd.DataFrame(columns=["pergunta"]).to_csv("data/nao_respondido.csv", index=False)

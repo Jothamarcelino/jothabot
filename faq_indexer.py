@@ -4,22 +4,21 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain.schema import Document
 from langchain.text_splitter import CharacterTextSplitter
 import os
-import shutil
 
 # Caminho do CSV
 csv_path = "data/faq.csv"
 
-# Carrega o CSV com nomes das colunas
+# Carrega o CSV com perguntas (coluna A), respostas (coluna B) e palavras-chave (coluna C)
 df = pd.read_csv(csv_path)
 
 docs = []
 
 for _, row in df.iterrows():
-    pergunta = str(row["PERGUNTA PRINCIPAL"]).strip()
-    resposta_html = str(row["RESPOSTA"]).strip()
-    palavras_chave = str(row["Palavra-chave/Tema"]).strip() if "Palavra-chave/Tema" in row else ""
+    pergunta = str(row[0])
+    resposta_html = str(row[1])
+    palavras_chave = str(row[2]) if len(row) > 2 else ""
     
-    # Texto que será vetorizado (pergunta + palavras-chave)
+    # Campo que será usado para a busca semântica
     texto_para_busca = pergunta + " " + palavras_chave
     
     doc = Document(
@@ -28,18 +27,14 @@ for _, row in df.iterrows():
     )
     docs.append(doc)
 
-# Divide os documentos em pedaços pequenos
+# Divide os documentos em pedaços
 splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=20)
 chunks = splitter.split_documents(docs)
 
-# Gera os embeddings
+# Embeddings
 embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
-# Apaga vetor antigo
-if os.path.exists("vectorstore/faq_index"):
-    shutil.rmtree("vectorstore/faq_index")
-
-# Cria e salva o vetor FAISS
+# Cria e salva FAISS
 db = FAISS.from_documents(chunks, embedding=embeddings)
 db.save_local("vectorstore/faq_index")
 
