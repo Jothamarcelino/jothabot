@@ -16,30 +16,34 @@ def normalize_string(s: str) -> str:
                 if unicodedata.category(c) != "Mn")
     return s.replace(" ", "_")
 
-# --- Cliente Groq ---
+# --- Cliente Groq para chat completions ---
 client = Groq(api_key=st.secrets["GROQ_API"])
 
-# --- Carrega vectorstore (usado para montar retrievers dinâmicos) ---
+# --- Carrega índices vetoriais com cache ---
 @st.cache_resource(show_spinner=False)
-def carregar_vectorstore(path: str):
+def carregar_retriever(path: str):
     emb = HuggingFaceEmbeddings(
         model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     )
-    return FAISS.load_local(path, emb, allow_dangerous_deserialization=True)
+    store = FAISS.load_local(path, emb, allow_dangerous_deserialization=True)
+    return store.as_retriever()
 
-vectorstore_faq    = carregar_vectorstore("vectorstore/faq_index")
-vectorstore_pdf    = carregar_vectorstore("vectorstore/legal_index")
-vectorstore_planos = carregar_vectorstore("vectorstore/planos_index")
+retriever_faq = carregar_retriever("vectorstore/faq_index")
+retriever_pdf = carregar_retriever("vectorstore/legal_index")
+retriever_planos = carregar_retriever("vectorstore/planos_index")
 
 # --- Busca exata no FAQ, filtrando primeiro por curso ---
 def buscar_faq_exata(pergunta: str):
     curso_usuario = normalize_string(st.session_state.get("curso", ""))
-    docs = vectorstore_faq.similarity_search(pergunta, k=20)
+    # busca ampla
+    docs = retriever_faq.vectorstore.similarity_search(pergunta, k=20)
+    # separa específicos x geral
     esp = [d for d in docs if normalize_string(d.metadata.get("curso")) == curso_usuario]
     candidatos = esp if esp else [d for d in docs if normalize_string(d.metadata.get("curso")) == "geral"]
     if not candidatos:
         return None
 
+    # shortcut para perguntas sobre horas
     if "hora" in pergunta.lower():
         bloco = max(
             (d for d in candidatos if "hora" in d.page_content.lower()),
@@ -49,45 +53,51 @@ def buscar_faq_exata(pergunta: str):
         if bloco:
             return bloco
 
-    emb_perg = vectorstore_faq.embedding_function.embed_query(pergunta)
+    emb_perg = retriever_faq.vectorstore.embedding_function.embed_query(pergunta)
     melhor, best_score = None, -1.0
     for d in candidatos:
-        emb_doc = vectorstore_faq.embedding_function.embed_query(d.page_content)
+        emb_doc = retriever_faq.vectorstore.embedding_function.embed_query(d.page_content)
         score = cosine_similarity([emb_perg], [emb_doc])[0][0]
         if score > best_score:
             melhor, best_score = d, score
 
     return melhor if best_score > 0.85 else None
 
-# --- Resposta final: monta contexto e envia para modelo ---
-def responder_usuario(pergunta: str):
-    raw_curso   = st.session_state.get("curso", "")
-    curso_title = raw_curso.replace("_", " ").title() if raw_curso else ""
-    ctx_user    = f"O usuário é do curso {curso_title}.\n" if curso_title else ""
+# --- Filtra documentos por curso (mantém 'geral') ---
+def filtrar_por_curso(docs, curso_usuario: str):
+    norm_u = normalize_string(curso_usuario)
+    return [
+        d for d in docs
+        if normalize_string(d.metadata.get("curso", "")) in (norm_u, "geral")
+    ]
 
-    if not (vectorstore_faq and vectorstore_pdf and vectorstore_planos):
+# --- Responde ao usuário com RAG + fallback FAQ ---
+def responder_usuario(pergunta: str):
+    if not (retriever_faq and retriever_pdf and retriever_planos):
         return (
             "⚠️ Meus índices ainda estão carregando. "
             "Envie as pastas `faq_index`, `legal_index` e `planos_index` e clique em 'Rerun'.",
             False
         )
 
-    # 1) FAQ exato
+    raw_curso   = st.session_state.get("curso", "")
+    curso_title = raw_curso.replace("_", " ").title() if raw_curso else ""
+    ctx_user    = f"O usuário é do curso {curso_title}.\n" if curso_title else ""
+
+    # 1) Tenta resposta exata via FAQ
     doc_exato = buscar_faq_exata(pergunta)
     if doc_exato:
+        # limpa número e metadado
         texto = doc_exato.page_content
-        texto = texto.split("metadado:")[0]
-        texto = re.sub(r"^\s*\d+\.\s*", "", texto).strip()
-        return f"🤗 Claro! {texto} 😊", True
+        texto = texto.split("metadado:")[0]                    # remove tudo após "metadado:"
+        texto = re.sub(r"^\s*\d+\.\s*", "", texto).strip()     # remove prefixo "N. "
+        resp  = f"🤗 Claro! {texto} 😊"
+        return resp, True
 
-    # 2) RAG com filtro direto por curso
-    retr_faq = vectorstore_faq.as_retriever(search_kwargs={"k": 4, "filter": {"curso": raw_curso}})
-    retr_planos = vectorstore_planos.as_retriever(search_kwargs={"k": 4, "filter": {"curso": raw_curso}})
-    retr_pdf = vectorstore_pdf.as_retriever(search_kwargs={"k": 4})  # sem filtro
-
-    docs_faq = retr_faq.invoke(pergunta)
-    docs_pdf = retr_pdf.invoke(pergunta)
-    docs_planos = retr_planos.invoke(pergunta)
+    # 2) Resto do RAG: busca + filtro por curso
+    docs_faq    = filtrar_por_curso(retriever_faq.invoke(pergunta), raw_curso)
+    docs_pdf    = retriever_pdf.invoke(pergunta)
+    docs_planos = filtrar_por_curso(retriever_planos.invoke(pergunta), raw_curso)
 
     if not (docs_faq or docs_pdf or docs_planos):
         return (
@@ -96,14 +106,17 @@ def responder_usuario(pergunta: str):
             False
         )
 
-    todos = docs_faq[:2] + docs_pdf[:2] + docs_planos[:3]
+    # 3) Concatena conteúdos para contexto
+    todos    = docs_faq[:2] + docs_pdf[:2] + docs_planos[:3]
     contexto = "\n\n".join(d.page_content for d in todos)[:15000]
 
+    # 4) Histórico das últimas 6 mensagens
     historico = ""
     if st.session_state.get("chat_history"):
         ult = st.session_state.chat_history[-6:]
         historico = "\n".join(f"{e['role']}: {e['content']}" for e in ult)
 
+    # 5) Monta prompt para Groq
     system = (
         f"{ctx_user}"
         "Você é o JOTHA, assistente virtual da Coordenação de Estágio do IF Sudeste MG - Campus Barbacena.\n"
