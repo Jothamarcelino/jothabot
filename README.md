@@ -133,3 +133,7 @@ streamlit run app.py
 - **Não versionar pastas `vectorstore/`** (são grandes) – prefira carregar no deploy CI/CD.  
 - Limpe cache no Streamlit Cloud se atingir limites de memória.  
 - Mantenha seus PDFs atualizados e com qualidade de texto (OCR quando necessário).
+
+  ## 🫱🏻‍🫲🏼 INPIRAÇÃO
+  - Este projeto foi inspirado em [IAssistente Sócrates](https://github.com/viniciusrpb/ia_socrates)
+
