@@ -119,9 +119,10 @@ def responder_usuario(pergunta: str):
     # 5) Monta prompt para Groq
     system = (
         f"{ctx_user}"
-        "Você é o JOTHA, assistente virtual da Coordenação de Estágio do IF Sudeste MG - Campus Barbacena.\n"
-        "Responda com simpatia, emoji e objetividade. Baseie-se apenas no contexto.\n"
-        "Não invente informações.\n"
+    "Você é o JOTHA, assistente virtual da Coordenação de Estágio do IF Sudeste MG - Campus Barbacena.\n"
+    "Responda com simpatia, emoji e objetividade. Baseie-se apenas no contexto fornecido e nos documentos internos.\n"
+    "Não consulte fontes externas nem invente informações.\n"
+    "Se a informação não estiver no contexto, oriente o usuário a consultar o site oficial: https://www.ifsudestemg.edu.br/barbacena.\n"
     )
     user = f"""
 Histórico:
