@@ -1,4 +1,5 @@
 import os
+import re
 import pandas as pd
 import streamlit as st
 import unicodedata
@@ -7,125 +8,111 @@ from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores.utils import cosine_similarity
 
-# Função para normalizar strings (remove acentos, converte para minúsculas e substitui espaços por underline)
+# --- Normalização de strings: remove acentos, lower, underscores ---
 def normalize_string(s: str) -> str:
+    s = s or ""
     s = s.lower()
-    s = ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+    s = "".join(c for c in unicodedata.normalize("NFD", s)
+                if unicodedata.category(c) != "Mn")
     return s.replace(" ", "_")
 
-# Inicializa o cliente Groq
+# --- Cliente Groq ---
 client = Groq(api_key=st.secrets["GROQ_API"])
 
-# Função de carregamento de índice vetorial com cache
+# --- Carrega vectorstore (usado para montar retrievers dinâmicos) ---
 @st.cache_resource(show_spinner=False)
-def carregar_retriever(path):
-    embeddings = HuggingFaceEmbeddings(
+def carregar_vectorstore(path: str):
+    emb = HuggingFaceEmbeddings(
         model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     )
-    return FAISS.load_local(path, embeddings, allow_dangerous_deserialization=True).as_retriever()
+    return FAISS.load_local(path, emb, allow_dangerous_deserialization=True)
 
-# Carrega os retrievers
-retriever_faq = carregar_retriever("vectorstore/faq_index")
-retriever_pdf = carregar_retriever("vectorstore/legal_index")
-retriever_planos = carregar_retriever("vectorstore/planos_index")
+vectorstore_faq    = carregar_vectorstore("vectorstore/faq_index")
+vectorstore_pdf    = carregar_vectorstore("vectorstore/legal_index")
+vectorstore_planos = carregar_vectorstore("vectorstore/planos_index")
 
-# Busca exata no FAQ com similaridade por metadado e filtro por curso
-def buscar_faq_exata(pergunta):
-    docs = retriever_faq.vectorstore.similarity_search(pergunta, k=10)
-    if not docs:
+# --- Busca exata no FAQ, filtrando primeiro por curso ---
+def buscar_faq_exata(pergunta: str):
+    curso_usuario = normalize_string(st.session_state.get("curso", ""))
+    docs = vectorstore_faq.similarity_search(pergunta, k=20)
+    esp = [d for d in docs if normalize_string(d.metadata.get("curso")) == curso_usuario]
+    candidatos = esp if esp else [d for d in docs if normalize_string(d.metadata.get("curso")) == "geral"]
+    if not candidatos:
         return None
 
-    curso_usuario = normalize_string(st.session_state.get("curso", ""))
-    pergunta_embedding = retriever_faq.vectorstore.embedding_function.embed_query(pergunta)
+    if "hora" in pergunta.lower():
+        bloco = max(
+            (d for d in candidatos if "hora" in d.page_content.lower()),
+            key=lambda d: len(d.page_content),
+            default=None
+        )
+        if bloco:
+            return bloco
 
-    melhor_doc = None
-    melhor_score = -1
+    emb_perg = vectorstore_faq.embedding_function.embed_query(pergunta)
+    melhor, best_score = None, -1.0
+    for d in candidatos:
+        emb_doc = vectorstore_faq.embedding_function.embed_query(d.page_content)
+        score = cosine_similarity([emb_perg], [emb_doc])[0][0]
+        if score > best_score:
+            melhor, best_score = d, score
 
-    for doc in docs:
-        curso_doc = normalize_string(doc.metadata.get("curso", "geral"))
-        # Considera válido se o documento for "geral" ou se houver correspondência parcial
-        if curso_doc != "geral" and (curso_usuario not in curso_doc and curso_doc not in curso_usuario):
-            continue
+    return melhor if best_score > 0.85 else None
 
-        # Usa o metadado "input" se existir; caso contrário, pega os primeiros 200 caracteres do conteúdo
-        texto_referencia = doc.metadata.get("input", "") or doc.page_content[:200]
-        doc_embedding = retriever_faq.vectorstore.embedding_function.embed_query(texto_referencia)
-        score = cosine_similarity([pergunta_embedding], [doc_embedding])[0][0]
+# --- Resposta final: monta contexto e envia para modelo ---
+def responder_usuario(pergunta: str):
+    raw_curso   = st.session_state.get("curso", "")
+    curso_title = raw_curso.replace("_", " ").title() if raw_curso else ""
+    ctx_user    = f"O usuário é do curso {curso_title}.\n" if curso_title else ""
 
-        if score > melhor_score:
-            melhor_doc = doc
-            melhor_score = score
-
-    if melhor_score > 0.85:
-        return melhor_doc
-    return None
-
-# Função para filtrar documentos por curso, permitindo "geral" como fallback
-def filtrar_por_curso(docs, curso_usuario):
-    filtrados = []
-    norm_usuario = normalize_string(curso_usuario)
-    for doc in docs:
-        curso_doc = normalize_string(doc.metadata.get("curso", "geral"))
-        if curso_doc == "geral" or norm_usuario in curso_doc or curso_doc in norm_usuario:
-            filtrados.append(doc)
-    return filtrados
-
-# Função principal de resposta do JOTHA
-def responder_usuario(pergunta):
-    if not retriever_faq and not retriever_pdf and not retriever_planos:
+    if not (vectorstore_faq and vectorstore_pdf and vectorstore_planos):
         return (
-            "⚠️ Os arquivos vetoriais ainda não foram carregados. "
-            "Acesse a aba 'Files' e envie as pastas `faq_index`, `legal_index` e `planos_index`, depois clique em 'Rerun'.",
-            False,
+            "⚠️ Meus índices ainda estão carregando. "
+            "Envie as pastas `faq_index`, `legal_index` e `planos_index` e clique em 'Rerun'.",
+            False
         )
 
-    curso_usuario = st.session_state.get("curso", "").strip()
-    contexto_usuario = (
-        f"O usuário é do curso {curso_usuario.replace('_', ' ').title()}.\n"
-        if curso_usuario
-        else ""
-    )
-
-    # Tenta responder via FAQ com busca exata
+    # 1) FAQ exato
     doc_exato = buscar_faq_exata(pergunta)
     if doc_exato:
-        return doc_exato.page_content.strip(), True
+        texto = doc_exato.page_content
+        texto = texto.split("metadado:")[0]
+        texto = re.sub(r"^\s*\d+\.\s*", "", texto).strip()
+        return f"🤗 Claro! {texto} 😊", True
 
-    # Recupera documentos dos três retrievers e filtra pelo curso
-    docs_faq = filtrar_por_curso(retriever_faq.get_relevant_documents(pergunta), curso_usuario)
-    docs_pdf = retriever_pdf.get_relevant_documents(pergunta)
-    docs_planos = filtrar_por_curso(retriever_planos.get_relevant_documents(pergunta), curso_usuario)
+    # 2) RAG com filtro direto por curso
+    retr_faq = vectorstore_faq.as_retriever(search_kwargs={"k": 4, "filter": {"curso": raw_curso}})
+    retr_planos = vectorstore_planos.as_retriever(search_kwargs={"k": 4, "filter": {"curso": raw_curso}})
+    retr_pdf = vectorstore_pdf.as_retriever(search_kwargs={"k": 4})  # sem filtro
 
-    # Se nenhum documento for encontrado, retorna mensagem de dúvida
-    if not docs_faq and not docs_pdf and not docs_planos:
+    docs_faq = retr_faq.invoke(pergunta)
+    docs_pdf = retr_pdf.invoke(pergunta)
+    docs_planos = retr_planos.invoke(pergunta)
+
+    if not (docs_faq or docs_pdf or docs_planos):
         return (
-            "🤔 Hmm... não encontrei nada sobre isso nos meus arquivos. Mas já registrei sua dúvida! 😉",
-            False,
+            "🤔 Não encontrei nada nos meus arquivos. "
+            "Anotei sua dúvida e vou repassar para a coordenação!",
+            False
         )
 
-    # Concatena conteúdos dos documentos para formar o contexto, limitando o tamanho
-    contexto = "\n\n".join(
-        [doc.page_content for doc in (docs_faq[:2] + docs_pdf[:2] + docs_planos[:3])]
-    )[:15000]
+    todos = docs_faq[:2] + docs_pdf[:2] + docs_planos[:3]
+    contexto = "\n\n".join(d.page_content for d in todos)[:15000]
 
     historico = ""
-    if "chat_history" in st.session_state:
-        # Limita ao histórico das últimas 6 mensagens
-        historico = "\n".join(
-            [f"{entry['role']}: {entry['content']}" for entry in st.session_state.chat_history[-6:]]
-        )
+    if st.session_state.get("chat_history"):
+        ult = st.session_state.chat_history[-6:]
+        historico = "\n".join(f"{e['role']}: {e['content']}" for e in ult)
 
-    prompt = f"""
-{contexto_usuario}
-Histórico da conversa:
+    system = (
+        f"{ctx_user}"
+        "Você é o JOTHA, assistente virtual da Coordenação de Estágio do IF Sudeste MG - Campus Barbacena.\n"
+        "Responda com simpatia, emoji e objetividade. Baseie-se apenas no contexto.\n"
+        "Não invente informações.\n"
+    )
+    user = f"""
+Histórico:
 {historico}
-
-Você é o JOTHA, assistente virtual da Coordenação de Estágio do IF Sudeste MG - Campus Barbacena.
-Responda com simpatia, use emoticons e seja direto. Sua resposta deve se basear apenas no contexto abaixo.
-⚠️ **Não invente informações. Não improvise. Seja claro, preciso e divertido.**
-
-Se a resposta estiver no contexto, use exatamente o que estiver escrito.
-Se não encontrar a resposta, diga que não encontrou e oriente o usuário a entrar em contato com a Coordenação de Estágio.
 
 Contexto:
 {contexto}
@@ -135,28 +122,24 @@ Pergunta:
 
 Resposta:
 """
-
-    response = client.chat.completions.create(
+    rsp = client.chat.completions.create(
         model="llama3-8b-8192",
         messages=[
-            {"role": "system", "content": "Você responde em português, com gentileza e precisão."},
-            {"role": "user", "content": prompt},
+            {"role": "system", "content": system},
+            {"role": "user",   "content": user},
         ],
         temperature=0.3,
         max_tokens=512,
     )
+    return rsp.choices[0].message.content.strip(), True
 
-    return response.choices[0].message.content.strip(), True
-
-# Registro de perguntas não respondidas
-def registrar_pergunta_nao_respondida(pergunta):
+# --- Registra perguntas não respondidas ---
+def registrar_pergunta_nao_respondida(pergunta: str):
     os.makedirs("data", exist_ok=True)
-    filepath = "data/nao_respondido.csv"
-
-    if not os.path.exists(filepath):
-        pd.DataFrame(columns=["pergunta"]).to_csv(filepath, index=False)
-
-    df = pd.read_csv(filepath)
+    path = "data/nao_respondido.csv"
+    if not os.path.exists(path):
+        pd.DataFrame(columns=["pergunta"]).to_csv(path, index=False)
+    df = pd.read_csv(path)
     if pergunta not in df["pergunta"].values:
-        df.loc[len(df)] = [pergunta]
-        df.to_csv(filepath, index=False)
+        df.loc[len(df)] = pergunta
+        df.to_csv(path, index=False)
