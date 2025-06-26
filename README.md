@@ -56,7 +56,7 @@ Tudo orquestrado em uma interface **Streamlit** com:
 ├── data/                    # Criar pasta data 
 |   ├── faq.pdf              # PDFs do FAQ 
 │   ├── planos/              # PDFs lei e regulamentos  
-|   ├── planos/              # PDFs dos PPCs
+|   ├── legal/               # PDFs dos PPCs
 │   └── nao_respondido.csv   # Perguntas que não tiveram resposta
 ├── vectorstore/
 │   ├── faq_index/           # Persistência FAISS para FAQ
