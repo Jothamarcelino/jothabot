@@ -53,7 +53,7 @@ Tudo orquestrado em uma interface **Streamlit** com:
 ├── planos_indexer.py        # Script de indexação dos PPCs
 ├── faq_indexer.py           # indexador do FAQ
 ├── legal_indexer.py         # indexador das leis
-├── data/                    # Criar pasta data 
+├── data/                    
 |   ├── faq.pdf              # PDFs do FAQ 
 │   ├── planos/              # PDFs lei e regulamentos  
 |   ├── legal/               # PDFs dos PPCs
@@ -134,6 +134,8 @@ streamlit run app.py
 - Limpe cache no Streamlit Cloud se atingir limites de memória.  
 - Mantenha seus PDFs atualizados e com qualidade de texto (OCR quando necessário).
 
-  ## 🫱🏻‍🫲🏼 INPIRAÇÃO
-  - Este projeto foi inspirado em [IAssistente Sócrates](https://github.com/viniciusrpb/ia_socrates)
+---
+
+## 🫱🏻‍🫲🏼 INPIRAÇÃO
+- Este projeto foi inspirado em [IAssistente Sócrates](https://github.com/viniciusrpb/ia_socrates)
 
