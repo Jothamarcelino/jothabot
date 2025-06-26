@@ -1,4 +1,4 @@
-# JOTHA 2.0
+# JOTHABOT 2.0
 
 O **JOTHA** é um assistente virtual desenvolvido para a Coordenação de estágio do IF Sudeste MG – Campus Barbacena que usa técnicas de RAG (Retrieval‐Augmented Generation) para responder dúvidas de alunos com base em:
 
@@ -51,9 +51,12 @@ Tudo orquestrado em uma interface **Streamlit** com:
 ├── app.py                   # Front-end Streamlit
 ├── utils.py                 # Funções de RAG, busca e Groq
 ├── planos_indexer.py        # Script de indexação dos PPCs
-├── faq_indexer.py?          # (Opcional) indexador do FAQ
-├── data/
-│   ├── planos/              # PDFs dos PPCs
+├── faq_indexer.py           # indexador do FAQ
+├── legal_indexer.py         # indexador das leis
+├── data/                    # Criar pasta data 
+|   ├── faq.pdf              # PDFs do FAQ 
+│   ├── planos/              # PDFs lei e regulamentos  
+|   ├── planos/              # PDFs dos PPCs
 │   └── nao_respondido.csv   # Perguntas que não tiveram resposta
 ├── vectorstore/
 │   ├── faq_index/           # Persistência FAISS para FAQ
